@@ -44,6 +44,11 @@ class Client(BaseClient):
         file_contents = c0a + "/" + c0b + "/" + c1 + "/" + c2 + "/" + iv
         uid = self.crypto.get_random_bytes(32)
 
+        print("Symm Key 2")
+        print(symm_key_2)
+        print("c1")
+        print(c1)
+
         # 2. Check for mapping of ‘username/dict/pw’: asymmencrypt(symm_key_for_dict, assymSign(symm_key_for_dict))
         id = self.username+"/dict/pw"
         enc_dictpw = self.storage_server.get(id)
@@ -52,39 +57,40 @@ class Client(BaseClient):
 
         if not enc_dictpw:
             #Create new dictionary
-            dictpw = self.crypto.get_random_bytes(32)
-            p = dictpw + "/" + self.crypto.asymmetric_sign(dictpw, self.rsa_priv_key)
-            enc_p = self.crypto.asymmetric_encrypt(p, self.pks.get_encryption_key(self.username))
-            self.storage_server.put(id, enc_p)
+            dictpw = self.crypto.get_random_bytes(16)
+            enc_p = self.crypto.asymmetric_encrypt(dictpw, self.pks.get_encryption_key(self.username))
+            enc_p_str = enc_p + "/" + iv
+            self.storage_server.put(id, enc_p_str)
 
             fileDict = dict()
 
         else:
             fileDict = self.get_dictionary(enc_dictpw)
-       
-        hashed_name = self.crypto.cryptographic_hash(name, hash_name="SHA256")
+
+        hashed_name = self.crypto.cryptographic_hash(name, "SHA256")
         if hashed_name in fileDict:
             old_uid = fileDict[hashed_name]
             self.storage_server.delete(old_uid)
-        
+
         fileDict[hashed_name] = uid
 
         self.storage_server.put(uid, file_contents)
         self.storage_server.put(self.username+"/dict", self.crypto.symmetric_encrypt(json.dumps(fileDict), dictpw, cipher_name='AES', mode_name='CBC', IV=iv, iv=None, counter=None, ctr=None, segment_size=None))
-            
+
 
     def download(self, name):
         # Replace with your implementation
         enc_dictpw =  self.storage_server.get(self.username+"/dict/pw")
-        if not enc_dictpw: 
+        if not enc_dictpw:
             return None
         fileDict = self.get_dictionary(enc_dictpw)
+
 
         hashed_name = self.crypto.cryptographic_hash(name, hash_name="SHA256")
         if hashed_name not in fileDict:
             return None
         uid = fileDict[hashed_name]
-        
+
         file_contents = self.storage_server.get(uid)
 
         fc_list = file_contents.split("/")
@@ -95,24 +101,28 @@ class Client(BaseClient):
         c2 = fc_list[3]
         iv = fc_list[4]
 
+        print("Going to decrypt symmetric key \n")
         symm_key_1 = self.crypto.asymmetric_decrypt(c0a, self.elg_priv_key)
+        print("Decrypted symmetric key 1 \n")
         symm_key_2 = self.crypto.asymmetric_decrypt(c0b, self.elg_priv_key)
-        if self.crypto.message_authentication_code(symm_key_2, c1) != c2:
+        print("Symm Key 2")
+        print(symm_key_2)
+        print("c1")
+        print(c1)
+        if self.crypto.message_authentication_code(symm_key_2, c1, "SHA256") != c2:
             raise IntegrityError
-        
+
         return self.crypto.symmetric_decrypt(c1, symm_key_1, cipher_name='AES', mode_name='CBC', IV=iv, iv=None, counter=None, ctr=None, segment_size=None)
 
 
-    
+
     def get_dictionary(self, enc_dictpw):
-        dec_dictpw = self.crypto.asymmetric_decrypt(enc_dictpw, self.elg_priv_key)
-        dictpw, sign_dictpw = dec_dictpw.split("/")
-        if not self.crypto.asymmetric_verify(dictpw, sign_dictpw, self.pks.get_signature_key(self.username)):
-            raise IntegrityError
-        
+        enc_dict, iv = enc_dictpw.split("/")
+        dec_dictpw = self.crypto.asymmetric_decrypt(enc_dict, self.elg_priv_key)
+
         enc_fileDict = self.storage_server.get(self.username+"/dict")
 
-        return json.loads(self.crypto.symmetric_decrypt(enc_fileDict, dictpw))
+        return json.loads(self.crypto.symmetric_decrypt(enc_fileDict, dec_dictpw, 'AES', 'CBC', iv))
 
     def share(self, user, name):
         # Replace with your implementation (not needed for Part 1)
