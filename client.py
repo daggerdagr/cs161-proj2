@@ -44,11 +44,6 @@ class Client(BaseClient):
         file_contents = c0a + "/" + c0b + "/" + c1 + "/" + c2 + "/" + iv
         uid = self.crypto.get_random_bytes(32)
 
-        print("Symm Key 2")
-        print(symm_key_2)
-        print("c1")
-        print(c1)
-
         # 2. Check for mapping of ‘username/dict/pw’: asymmencrypt(symm_key_for_dict, assymSign(symm_key_for_dict))
         id = self.username+"/dict/pw"
         enc_dictpw = self.storage_server.get(id)
@@ -65,7 +60,9 @@ class Client(BaseClient):
             fileDict = dict()
 
         else:
-            fileDict = self.get_dictionary(enc_dictpw)
+            enc_dict, iv = enc_dictpw.split("/")
+            dictpw = self.crypto.asymmetric_decrypt(enc_dict, self.elg_priv_key)
+            fileDict = self.get_dictionary(dictpw, iv)
 
         hashed_name = self.crypto.cryptographic_hash(name, "SHA256")
         if hashed_name in fileDict:
@@ -83,7 +80,9 @@ class Client(BaseClient):
         enc_dictpw =  self.storage_server.get(self.username+"/dict/pw")
         if not enc_dictpw:
             return None
-        fileDict = self.get_dictionary(enc_dictpw)
+        enc_dict, iv = enc_dictpw.split("/")
+        dictpw = self.crypto.asymmetric_decrypt(enc_dict, self.elg_priv_key)
+        fileDict = self.get_dictionary(dictpw, iv)
 
 
         hashed_name = self.crypto.cryptographic_hash(name, hash_name="SHA256")
@@ -101,28 +100,21 @@ class Client(BaseClient):
         c2 = fc_list[3]
         iv = fc_list[4]
 
-        print("Going to decrypt symmetric key \n")
         symm_key_1 = self.crypto.asymmetric_decrypt(c0a, self.elg_priv_key)
-        print("Decrypted symmetric key 1 \n")
         symm_key_2 = self.crypto.asymmetric_decrypt(c0b, self.elg_priv_key)
-        print("Symm Key 2")
-        print(symm_key_2)
-        print("c1")
-        print(c1)
-        if self.crypto.message_authentication_code(symm_key_2, c1, "SHA256") != c2:
+
+        if self.crypto.message_authentication_code(c1, symm_key_2, "SHA256") != c2:
             raise IntegrityError
 
         return self.crypto.symmetric_decrypt(c1, symm_key_1, cipher_name='AES', mode_name='CBC', IV=iv, iv=None, counter=None, ctr=None, segment_size=None)
 
 
 
-    def get_dictionary(self, enc_dictpw):
-        enc_dict, iv = enc_dictpw.split("/")
-        dec_dictpw = self.crypto.asymmetric_decrypt(enc_dict, self.elg_priv_key)
+    def get_dictionary(self, enc_dictpw, iv):
 
         enc_fileDict = self.storage_server.get(self.username+"/dict")
 
-        return json.loads(self.crypto.symmetric_decrypt(enc_fileDict, dec_dictpw, 'AES', 'CBC', iv))
+        return json.loads(self.crypto.symmetric_decrypt(enc_fileDict, enc_dictpw, 'AES', 'CBC', iv))
 
     def share(self, user, name):
         # Replace with your implementation (not needed for Part 1)
