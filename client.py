@@ -61,7 +61,11 @@ class Client(BaseClient):
 
         else:
             enc_dict, iv = enc_dictpw.split("/")
-            dictpw = self.crypto.asymmetric_decrypt(enc_dict, self.elg_priv_key)
+            try:
+                dictpw = self.crypto.asymmetric_decrypt(enc_dict, self.elg_priv_key)
+            except:
+                raise IntegrityError
+
             fileDict = self.get_dictionary(dictpw, iv)
 
         hashed_name = self.crypto.cryptographic_hash(name, "SHA256")
@@ -81,7 +85,10 @@ class Client(BaseClient):
         if not enc_dictpw:
             return None
         enc_dict, iv = enc_dictpw.split("/")
-        dictpw = self.crypto.asymmetric_decrypt(enc_dict, self.elg_priv_key)
+        try:
+            dictpw = self.crypto.asymmetric_decrypt(enc_dict, self.elg_priv_key)
+        except:
+            raise IntegrityError
         fileDict = self.get_dictionary(dictpw, iv)
 
 
@@ -94,19 +101,27 @@ class Client(BaseClient):
 
         fc_list = file_contents.split("/")
 
+        if len(fc_list) != 5:
+            raise IntegrityError
+
         c0a = fc_list[0]
         c0b = fc_list[1]
         c1 = fc_list[2]
         c2 = fc_list[3]
         iv = fc_list[4]
 
-        symm_key_1 = self.crypto.asymmetric_decrypt(c0a, self.elg_priv_key)
-        symm_key_2 = self.crypto.asymmetric_decrypt(c0b, self.elg_priv_key)
+        try:
+            symm_key_1 = self.crypto.asymmetric_decrypt(c0a, self.elg_priv_key)
+            symm_key_2 = self.crypto.asymmetric_decrypt(c0b, self.elg_priv_key)
 
-        if self.crypto.message_authentication_code(c1, symm_key_2, "SHA256") != c2:
+            if self.crypto.message_authentication_code(c1, symm_key_2, "SHA256") != c2:
+                raise IntegrityError
+
+            result = self.crypto.symmetric_decrypt(c1, symm_key_1, cipher_name='AES', mode_name='CBC', IV=iv, iv=None, counter=None, ctr=None, segment_size=None)
+        except:
             raise IntegrityError
 
-        return self.crypto.symmetric_decrypt(c1, symm_key_1, cipher_name='AES', mode_name='CBC', IV=iv, iv=None, counter=None, ctr=None, segment_size=None)
+        return result
 
 
 
@@ -114,7 +129,12 @@ class Client(BaseClient):
 
         enc_fileDict = self.storage_server.get(self.username+"/dict")
 
-        return json.loads(self.crypto.symmetric_decrypt(enc_fileDict, enc_dictpw, 'AES', 'CBC', iv))
+        try:
+            result = json.loads(self.crypto.symmetric_decrypt(enc_fileDict, enc_dictpw, 'AES', 'CBC', iv))
+        except:
+            raise IntegrityError
+
+        return result
 
     def share(self, user, name):
         # Replace with your implementation (not needed for Part 1)
