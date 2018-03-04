@@ -40,7 +40,8 @@ class Client(BaseClient):
         # Encrypt file content with symm keys
         iv = self.crypto.get_random_bytes(16)
         c1 = self.crypto.symmetric_encrypt(value, symm_key_1, cipher_name='AES', mode_name='CBC', IV=iv, iv=None, counter=None, ctr=None, segment_size=None)
-        c2 = self.crypto.message_authentication_code(c1, symm_key_2, hash_name="SHA256")
+        # c2 = self.crypto.message_authentication_code(c1, symm_key_2, hash_name="SHA256")
+        c2 = self.crypto.asymmetric_sign(c1, self.rsa_priv_key)
 
         file_contents = c0 + "/" + c1 + "/" + c2 + "/" + iv
         uid = self.crypto.get_random_bytes(32)
@@ -125,7 +126,8 @@ class Client(BaseClient):
             symm_key_1 = symm_keys[0]
             symm_key_2 = symm_keys[1]
 
-            if self.crypto.message_authentication_code(c1, symm_key_2, "SHA256") != c2:
+            # if self.crypto.message_authentication_code(c1, symm_key_2, "SHA256") != c2:
+            if not self.crypto.asymmetric_verify(c1, c2, self.pks.get_signature_key(self.username)):
                 raise IntegrityError
 
             result = self.crypto.symmetric_decrypt(c1, symm_key_1, cipher_name='AES', mode_name='CBC', IV=iv, iv=None, counter=None, ctr=None, segment_size=None)
