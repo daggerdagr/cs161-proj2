@@ -54,19 +54,20 @@ class Client(BaseClient):
             #Create new dictionary
             dictpw = self.crypto.get_random_bytes(16)
             enc_p = self.crypto.asymmetric_encrypt(dictpw, self.pks.get_encryption_key(self.username))
-            enc_p_str = enc_p + "/" + iv
+            iv2 = self.crypto.get_random_bytes(16)
+            enc_p_str = enc_p + "/" + iv2
             self.storage_server.put(id, enc_p_str)
 
             fileDict = dict()
 
         else:
-            enc_dict, iv = enc_dictpw.split("/")
+            enc_dict, iv2 = enc_dictpw.split("/")
             try:
                 dictpw = self.crypto.asymmetric_decrypt(enc_dict, self.elg_priv_key)
             except:
                 raise IntegrityError
 
-            fileDict = self.get_dictionary(dictpw, iv)
+            fileDict = self.get_dictionary(dictpw, iv2)
 
         hashed_name = self.crypto.cryptographic_hash(name, "SHA256")
         if hashed_name in fileDict:
@@ -76,7 +77,7 @@ class Client(BaseClient):
         fileDict[hashed_name] = uid
 
         self.storage_server.put(uid, file_contents)
-        self.storage_server.put(self.username+"/dict", self.crypto.symmetric_encrypt(json.dumps(fileDict), dictpw, cipher_name='AES', mode_name='CBC', IV=iv, iv=None, counter=None, ctr=None, segment_size=None))
+        self.storage_server.put(self.username+"/dict", self.crypto.symmetric_encrypt(json.dumps(fileDict), dictpw, cipher_name='AES', mode_name='CBC', IV=iv2, iv=None, counter=None, ctr=None, segment_size=None))
 
 
     def download(self, name):
