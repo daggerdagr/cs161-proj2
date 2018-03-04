@@ -48,27 +48,32 @@ class Client(BaseClient):
 
         # 2. Check for mapping of ‘username/dict/pw’: asymmencrypt(symm_key_for_dict, assymSign(symm_key_for_dict))
         id = self.username+"/dict/pw"
-        enc_dictpw = self.storage_server.get(id)
+        enc_dictpw_stor_val = self.storage_server.get(id)
 
         # fileDict
 
-        if not enc_dictpw:
+        if not enc_dictpw_stor_val:
             #Create new dictionary
             dictpw = self.crypto.get_random_bytes(16)
-            enc_p = self.crypto.asymmetric_encrypt(dictpw, self.pks.get_encryption_key(self.username))
+            enc_dictpw = self.crypto.asymmetric_encrypt(dictpw, self.pks.get_encryption_key(self.username))
             iv2 = self.crypto.get_random_bytes(16)
-            enc_p_str = enc_p + "/" + iv2
-            self.storage_server.put(id, enc_p_str)
+
+            sig_enc_dictpw = self.crypto.asymmetric_sign(enc_dictpw, self.rsa_priv_key)
+
+            enc_dictpw_stor_val = enc_dictpw + "/" + iv2 + "/" + sig_enc_dictpw
+            self.storage_server.put(id, enc_dictpw_stor_val)
 
             fileDict = dict()
 
         else:
-            stuff = enc_dictpw.split("/")
-            if len(stuff) != 2:
+            stuff = enc_dictpw_stor_val.split("/")
+            if len(stuff) != 3:
                 return False
-            enc_dict, iv2 = enc_dictpw.split("/")
+            enc_dictpw, iv2, sig_enc_dictpw = stuff
+            if not self.crypto.asymmetric_verify(enc_dictpw, sig_enc_dictpw, self.pks.get_signature_key(self.username)):
+                return False
             try:
-                dictpw = self.crypto.asymmetric_decrypt(enc_dict, self.elg_priv_key)
+                dictpw = self.crypto.asymmetric_decrypt(enc_dictpw, self.elg_priv_key)
             except:
                 return False
 
@@ -94,9 +99,12 @@ class Client(BaseClient):
         if not enc_dictpw:
             return None
         stuff = enc_dictpw.split("/")
-        if len(stuff) != 2:
+        if len(stuff) != 3:
             raise IntegrityError
-        enc_dict, iv = enc_dictpw.split("/")
+        enc_dict, iv, sig_enc_dictpw = enc_dictpw.split("/")
+        if not self.crypto.asymmetric_verify(enc_dict, sig_enc_dictpw, self.pks.get_signature_key(self.username)):
+            # print("sike")
+            raise IntegrityError
         try:
             dictpw = self.crypto.asymmetric_decrypt(enc_dict, self.elg_priv_key)
         except:
