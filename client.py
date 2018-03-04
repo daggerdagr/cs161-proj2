@@ -32,16 +32,17 @@ class Client(BaseClient):
         symm_key_1 = self.crypto.get_random_bytes(32)
         symm_key_2 = self.crypto.get_random_bytes(32)
 
+        symm_keys = symm_key_1 + "/" +symm_key_2;
+
         # Generate ciphers for those symmetric keys with asymmetric encryption
-        c0a = self.crypto.asymmetric_encrypt(symm_key_1, pub_key)
-        c0b = self.crypto.asymmetric_encrypt(symm_key_2, pub_key)
+        c0 = self.crypto.asymmetric_encrypt(symm_keys, pub_key)
 
         # Encrypt file content with symm keys
         iv = self.crypto.get_random_bytes(16)
         c1 = self.crypto.symmetric_encrypt(value, symm_key_1, cipher_name='AES', mode_name='CBC', IV=iv, iv=None, counter=None, ctr=None, segment_size=None)
         c2 = self.crypto.message_authentication_code(c1, symm_key_2, hash_name="SHA256")
 
-        file_contents = c0a + "/" + c0b + "/" + c1 + "/" + c2 + "/" + iv
+        file_contents = c0 + "/" + c1 + "/" + c2 + "/" + iv
         uid = self.crypto.get_random_bytes(32)
 
         # 2. Check for mapping of ‘username/dict/pw’: asymmencrypt(symm_key_for_dict, assymSign(symm_key_for_dict))
@@ -61,13 +62,19 @@ class Client(BaseClient):
             fileDict = dict()
 
         else:
+            stuff = enc_dictpw.split("/")
+            if len(stuff) != 2:
+                return False
             enc_dict, iv2 = enc_dictpw.split("/")
             try:
                 dictpw = self.crypto.asymmetric_decrypt(enc_dict, self.elg_priv_key)
             except:
-                raise IntegrityError
+                return False
 
-            fileDict = self.get_dictionary(dictpw, iv2)
+            try:
+                fileDict = self.get_dictionary(dictpw, iv2)
+            except IntegrityError:
+                return False
 
         hashed_name = self.crypto.cryptographic_hash(name, "SHA256")
         if hashed_name in fileDict:
@@ -85,6 +92,9 @@ class Client(BaseClient):
         enc_dictpw =  self.storage_server.get(self.username+"/dict/pw")
         if not enc_dictpw:
             return None
+        stuff = enc_dictpw.split("/")
+        if len(stuff) != 2:
+            raise IntegrityError
         enc_dict, iv = enc_dictpw.split("/")
         try:
             dictpw = self.crypto.asymmetric_decrypt(enc_dict, self.elg_priv_key)
@@ -102,18 +112,18 @@ class Client(BaseClient):
 
         fc_list = file_contents.split("/")
 
-        if len(fc_list) != 5:
+        if len(fc_list) != 4:
             raise IntegrityError
 
-        c0a = fc_list[0]
-        c0b = fc_list[1]
-        c1 = fc_list[2]
-        c2 = fc_list[3]
-        iv = fc_list[4]
+        c0 = fc_list[0]
+        c1 = fc_list[1]
+        c2 = fc_list[2]
+        iv = fc_list[3]
 
         try:
-            symm_key_1 = self.crypto.asymmetric_decrypt(c0a, self.elg_priv_key)
-            symm_key_2 = self.crypto.asymmetric_decrypt(c0b, self.elg_priv_key)
+            symm_keys = self.crypto.asymmetric_decrypt(c0, self.elg_priv_key).split("/")
+            symm_key_1 = symm_keys[0]
+            symm_key_2 = symm_keys[1]
 
             if self.crypto.message_authentication_code(c1, symm_key_2, "SHA256") != c2:
                 raise IntegrityError
