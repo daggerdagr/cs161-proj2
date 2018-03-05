@@ -30,9 +30,11 @@ class Client(BaseClient):
 
         # Generate symm keys for MAC and file content
         symm_key_1 = self.crypto.get_random_bytes(32)
-        symm_key_2 = self.crypto.get_random_bytes(32)
+        # symm_key_2 = self.crypto.get_random_bytes(32)
 
-        symm_keys = symm_key_1 + "/" +symm_key_2;
+        uid = self.crypto.get_random_bytes(32)
+        # symm_keys = symm_key_1 + "/" +symm_key_2
+        symm_keys = symm_key_1 + "/" + uid
 
         # Generate ciphers for those symmetric keys with asymmetric encryption
         c0 = self.crypto.asymmetric_encrypt(symm_keys, pub_key)
@@ -44,7 +46,6 @@ class Client(BaseClient):
         c2 = self.crypto.asymmetric_sign(c1, self.rsa_priv_key)
 
         file_contents = c0 + "/" + c1 + "/" + c2 + "/" + iv
-        uid = self.crypto.get_random_bytes(32)
 
         # 2. Check for mapping of ‘username/dict/pw’: asymmencrypt(symm_key_for_dict, assymSign(symm_key_for_dict))
         id = self.username+"/dict/pw"
@@ -92,6 +93,8 @@ class Client(BaseClient):
         self.storage_server.put(uid, file_contents)
         self.storage_server.put(self.username+"/dict", self.crypto.symmetric_encrypt(json.dumps(fileDict), dictpw, cipher_name='AES', mode_name='CBC', IV=iv2, iv=None, counter=None, ctr=None, segment_size=None))
 
+        self.sofar = uid
+
 
     def download(self, name):
         # Replace with your implementation
@@ -131,9 +134,13 @@ class Client(BaseClient):
 
         try:
             symm_keys = self.crypto.asymmetric_decrypt(c0, self.elg_priv_key).split("/")
+            if len(symm_keys) != 2:
+                raise IntegrityError
             symm_key_1 = symm_keys[0]
-            symm_key_2 = symm_keys[1]
+            checkuid = symm_keys[1]
 
+            if checkuid != uid:
+                raise IntegrityError
             # if self.crypto.message_authentication_code(c1, symm_key_2, "SHA256") != c2:
             if not self.crypto.asymmetric_verify(c1, c2, self.pks.get_signature_key(self.username)):
                 raise IntegrityError

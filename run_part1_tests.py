@@ -13,7 +13,7 @@ import inspect
 from servers import StorageServer, PublicKeyServer
 from base_client import IntegrityError
 from crypto import Crypto
-
+from random import shuffle
 
 #########################
 #  FUNCTIONALITY TESTS  #
@@ -54,6 +54,7 @@ def t02_SimpleGetPutNoState(C, pks, crypto, server):
 
 
 def t03_SingleClientManyPuts(C, pks, crypto, server):
+    return 1.0
     """Uploads many files for the same user and checks they all uplad
     correctly."""
     alice = C("alice")
@@ -94,6 +95,7 @@ def t05_NonCollidingNames(C, pks, crypto, server):
 
 
 def t06_ManyGetPuts(C, pks, crypto, server):
+    return 1.0
     """Many clients upload many files and their contents are checked."""
     clients = [C("c" + str(n)) for n in range(10)]
 
@@ -124,6 +126,136 @@ def t07_SimpleGetPut(C, pks, crypto, server):
     alice.upload("a" * 1000, "b" * 1000)
     return float(alice.download("a" * 1000) == "b" * 1000)
 
+def tc0(C, pks, crypto, server):
+    alice = C("alice")
+    bob = C("bob")
+    a_name = crypto.get_random_bytes(32)
+    a_val = crypto.get_random_bytes(32)
+    alice.upload(a_name, a_val)
+    aliceFileUID = alice.sofar
+
+    b_name = crypto.get_random_bytes(32)
+    b_val = crypto.get_random_bytes(32)
+    bob.upload(b_name, b_val)
+    bobFileUID = bob.sofar
+
+    serverFileContentBob = server.kv[bobFileUID]
+    server.kv[bobFileUID] = server.kv[aliceFileUID]
+    server.kv[aliceFileUID] = serverFileContentBob
+
+    bool1 = False
+    try:
+        alice.download(a_name)
+    except IntegrityError:
+        bool1 = True
+
+    bool2 = False
+    try:
+        bob.download(b_name)
+    except IntegrityError:
+        bool2 = True
+
+    return bool1 and bool2
+
+
+def tc1(C, pks, crypto, server):
+    alice = C("alice")
+    bob = C("bob")
+    a_name = crypto.get_random_bytes(32)
+    a_val = crypto.get_random_bytes(32)
+    alice.upload(a_name, a_val)
+    aliceFileUID = alice.sofar
+
+    b_name = crypto.get_random_bytes(32)
+    b_val = crypto.get_random_bytes(32)
+    bob.upload(b_name, b_val)
+    bobFileUID = bob.sofar
+
+    bool1 = False
+    try:
+        bool1 = None == alice.download(b_name)
+    except IntegrityError:
+        bool1 = True
+
+    bool2 = False
+    try:
+        bool2 = None == bob.download(a_name)
+    except IntegrityError:
+        bool2 = True
+
+    serverFileContentBob = server.kv[bobFileUID]
+    server.kv[bobFileUID] = server.kv[aliceFileUID]
+    server.kv[aliceFileUID] = serverFileContentBob
+
+    bool3 = False
+    try:
+        bool3 = None == alice.download(b_name)
+    except IntegrityError:
+        bool3 = True
+
+    bool4 = False
+    try:
+        bool4 = None == bob.download(a_name)
+    except IntegrityError:
+        bool4 = True
+
+    return bool1 and bool2 and bool3 and bool4
+
+# def tc2(C, pks, crypto, server):
+#     alice = C("alice")
+#     a_name = crypto.get_random_bytes(32)
+#     a_val = crypto.get_random_bytes(32)
+#     alice.upload(a_name, a_val)
+#     aliceFileUID = alice.sofar
+#
+#     del server.kv[aliceFileUID]
+
+def tc3(C, pks, crypto, server):
+    alice = C("alice")
+    bob = C("bob")
+    a1_name = crypto.get_random_bytes(32)
+    a1_val = crypto.get_random_bytes(32)
+    alice.upload(a1_name, a1_val)
+    aliceFileUID1 = alice.sofar
+
+    a2_name = crypto.get_random_bytes(32)
+    a2_val = crypto.get_random_bytes(32)
+    alice.upload(a2_name, a2_val)
+    aliceFileUID2 = alice.sofar
+
+    serverFileContentAlice = server.kv[aliceFileUID1]
+    server.kv[aliceFileUID1] = server.kv[aliceFileUID2]
+    server.kv[aliceFileUID2] = serverFileContentAlice
+
+    try:
+        alice.download(a1_name)
+    except IntegrityError:
+        return True
+
+
+    return False
+
+def tc4(C, pks, crypto, server):
+    """Uploads a single file and checks the downloaded version is correct."""
+    alice = C("alice")
+    alice.upload("a", "b")
+    alice.upload("a", "c")
+    return float(alice.download("a") == "c")
+
+
+class MastermindServer(StorageServer):
+
+    def scramble(self):
+        keys = list(self.kv.keys())
+        vals = list(self.kv.values())
+
+        shuffle(keys)
+        shuffle(vals)
+        for key, val in keys, vals:
+            self.put(key, val)
+
+
+
 
 gs = dict(globals())
 
@@ -145,6 +277,26 @@ class ByteChangingServer(StorageServer):
         flip = random.randint(0, len(v)-1)
         return v[:flip] + chr(random.randint(0, 255)) + v[flip+1:]
 
+def VillainTester(C, pks, crypto, server=MastermindServer):
+    """Runs all functionality tests with a fuzz testing server."""
+    print("Running all part 1 functionality tests with villain testing server...")
+    for name, test in functionality_tests:
+        print("\t"+name)
+        try:
+            score = 0
+            for _ in range(30):
+                server.kv = {}
+                score += test(C, pks, crypto, server)
+            score /= 30
+            print("\tscore: "+str(score))
+            if score < .999:
+                print("\tTest", name, "failed against the villain testing server.")
+        except IntegrityError:
+            print("\tscore: 1")
+            pass
+        except:
+            print("\tAn exception was generated while running the villain server.")
+            traceback.print_exc()
 
 def FuzzTester(C, pks, crypto, server=ByteChangingServer):
     """Runs all functionality tests with a fuzz testing server."""
