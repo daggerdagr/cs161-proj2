@@ -122,6 +122,9 @@ class Client(BaseClient):
 
         file_contents = self.storage_server.get(uid)
 
+        if not file_contents:
+            raise IntegrityError
+
         fc_list = file_contents.split("/")
 
         if len(fc_list) != 4:
