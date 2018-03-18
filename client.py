@@ -112,27 +112,11 @@ class Client(BaseClient):
 
             ## GET PASSWORDS
 
-            # GET enc(password) + signed version of that
-            filePw_val = self.storage_server.get("/".join([self.username, fileUid, "pw"]))
+            filePw_dec = self.get_passwords(fileUid)
 
-            # verify if encrypted password is signed
-            filePw_val = filePw_val.split("/") # val
-            if len(filePw_val) != 2:
-                return False
-            filePw_enc, filePw_enc_signed = filePw_val #c1, c2
-
-            if not self.crypto.asymmetric_verify(filePw_enc, filePw_enc_signed,
-                                          self.pks.get_signature_keys(self.username)):
+            if filePw_dec == None:
                 return False
 
-            try:
-                filePw_dec = self.crypto.asymmetric_decrypt(filePw_val, self.elg_priv_key)
-            except:
-                return None
-
-            filePw_dec = filePw_dec.split("/")
-            if len(filePw_dec) != 3:
-                return False
             filePw_key, filePw_IV, filePw_mackey = filePw_dec
 
         else:
@@ -143,11 +127,11 @@ class Client(BaseClient):
 
             fileList[fileNameHash] = fileUid
 
-            shared_list = []
+            shared_list = set()
 
             counter = self.crypto.get_random_bytes(16)
 
-            content = fileUid + shared_list + counter
+            content = fileUid + repr(shared_list) + counter
 
             try:
                 content_enc = self.crypto.asymmetric_encrypt(content, self.pks.get_encryption_key(self.username)) # C8
@@ -181,72 +165,103 @@ class Client(BaseClient):
 
             self.storage_server.put("/".join([self.username, fileUid, "pw"]), store_val_enc)
 
+        # 5.
         fileContent_enc = self.crypto.symmetric_encrypt(value, filePw_key, cipher_name='AES', mode_name='CBC', IV=filePw_IV, iv=None, counter=None, ctr=None, segment_size=None) # C4
+        val = self.crypto.asymmetric_sign(fileUid, self.rsa_priv_key)
         fileContent_enc_mac = self.crypto.message_authentication_code(fileContent_enc, filePw_mackey, "SHA256")
 
-        self.storage_server.put("/".join([fileContent_enc, fileContent_enc_mac]))
+        self.storage_server.put(fileUid,"/".join([fileContent_enc + "/" + val, fileContent_enc_mac]))
 
         return True
 
 
 
     def download(self, name):
-        # Replace with your implementation
-        enc_dictpw =  self.storage_server.get(self.username+"/dict/pw")
-        if not enc_dictpw:
+
+        # 1. & 2. Grabbing file list
+        fileList = self.fileListGrabber()
+
+        if fileList == None:
             return None
-        stuff = enc_dictpw.split("/")
-        if len(stuff) != 3:
-            raise IntegrityError
-        enc_dict, iv, sig_enc_dictpw = enc_dictpw.split("/")
-        if not self.crypto.asymmetric_verify(enc_dict, sig_enc_dictpw, self.pks.get_signature_key(self.username)):
-            # print("sike")
-            raise IntegrityError
-        try:
-            dictpw = self.crypto.asymmetric_decrypt(enc_dict, self.elg_priv_key)
-        except:
-            raise IntegrityError
-        fileDict = self.get_dictionary(dictpw, iv)
 
+        fileNameHash = self.crypto.cryptographic_hash(name, hash_name="SHA256")
 
-        hashed_name = self.crypto.cryptographic_hash(name, hash_name="SHA256")
-        if hashed_name not in fileDict:
+        # 3. Checking file list for filenamehash
+        if fileNameHash not in fileList:
             return None
-        uid = fileDict[hashed_name]
 
-        file_contents = self.storage_server.get(uid)
+        # 4. Grabbing symm key and MAC for object
+        fileUid = fileList[fileNameHash]
 
-        if not file_contents:
+        filePw_dec = self.get_passwords(fileUid)
+
+        if filePw_dec == None:
             raise IntegrityError
 
-        fc_list = file_contents.split("/")
+        filePw_key, filePw_IV, filePw_mackey = filePw_dec
 
-        if len(fc_list) != 4:
+        # 5. Retrieve value mapped to "File1ObjUid_byOwner"
+        fileContent = self.storage_server.get(fileUid)
+        fileContent = fileContent.split("/")
+        if len(fileContent) != 2:
             raise IntegrityError
 
-        c0 = fc_list[0]
-        c1 = fc_list[1]
-        c2 = fc_list[2]
-        iv = fc_list[3]
+        c4, c5 = fileContent  # c4, c5
 
         try:
-            symm_keys = self.crypto.asymmetric_decrypt(c0, self.elg_priv_key).split("/")
-            if len(symm_keys) != 2:
+            if self.crypto.message_authentication_code(c4, filePw_mackey) != c5:
                 raise IntegrityError
-            symm_key_1 = symm_keys[0]
-            checkuid = symm_keys[1]
-
-            if checkuid != uid:
-                raise IntegrityError
-            # if self.crypto.message_authentication_code(c1, symm_key_2, "SHA256") != c2:
-            if not self.crypto.asymmetric_verify(c1, c2, self.pks.get_signature_key(self.username)):
-                raise IntegrityError
-
-            result = self.crypto.symmetric_decrypt(c1, symm_key_1, cipher_name='AES', mode_name='CBC', IV=iv, iv=None, counter=None, ctr=None, segment_size=None)
         except:
             raise IntegrityError
 
-        return result
+        try:
+            fileContentandSign = self.crypto.symmetric_decrypt(c4, filePw_key, 'AES', 'CBC', filePw_IV)
+        except:
+            raise IntegrityError
+
+        fileContentandSign = fileContentandSign.split("/")
+        if len(fileContentandSign) != 2:
+            raise IntegrityError
+
+        decFileContent, val = fileContentandSign
+
+        try:
+            self.crypto.asymmetric_verify(fileUid, val, self.pks.get_signature_keys(self.username))
+        except:
+            raise IntegrityError
+
+        return decFileContent
+
+
+
+
+    def get_passwords(self, fileUid):
+        ## GET PASSWORDS
+
+        # GET enc(password) + signed version of that
+        filePw_val = self.storage_server.get("/".join([self.username, fileUid, "pw"]))
+
+        # verify if encrypted password is signed
+        filePw_val = filePw_val.split("/")  # val
+        if len(filePw_val) != 2:
+            return None
+        filePw_enc, filePw_enc_signed = filePw_val  # c1, c2
+
+        if not self.crypto.asymmetric_verify(filePw_enc, filePw_enc_signed,
+                                             self.pks.get_signature_keys(self.username)):
+            return None
+
+        try:
+            filePw_dec = self.crypto.asymmetric_decrypt(filePw_val, self.elg_priv_key)
+        except:
+            return None
+
+        filePw_dec = filePw_dec.split("/")
+        if len(filePw_dec) != 3:
+            return None
+
+        return filePw_dec
+
 
 
 
