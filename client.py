@@ -50,27 +50,27 @@ class Client(BaseClient):
             fileListPw_enc = fileListPw_enc.split("/")
 
             if len(fileListPw_enc) != 2:
-                return None
+                raise IntegrityError
 
             fileListPw_val, fileListPw_val_sign = fileListPw_enc
 
             # verify password
             try:
                 if not self.crypto.asymmetric_verify(fileListPw_val, fileListPw_val_sign, self.pks.get_signature_key(self.username)):
-                    return None
+                    raise IntegrityError
             except:
-                return None
+                raise IntegrityError
 
             # decrypting password and fileList
             try:
                 fileListPw = self.crypto.asymmetric_decrypt(fileListPw_val, self.elg_priv_key)
             except:
-                return None
+                raise IntegrityError
 
             # getting symkey and IV
             fileListPw = fileListPw.split("/")
             if len(fileListPw) != 2:
-                return None
+                raise IntegrityError
             fileListPw_key, fileListPw_IV = fileListPw
 
 
@@ -80,22 +80,22 @@ class Client(BaseClient):
 
             fileList_val = fileList_val.split("/")
             if len(fileList_val) != 2:
-                return None
+                raise IntegrityError
             c0a, c0b = fileList_val
 
             # verifying if signature (c0b) for c0a is correcto
             try:
                 if not self.crypto.asymmetric_verify(c0a, c0b, self.pks.get_signature_key(self.username)):
-                    return None
+                    raise IntegrityError
             except:
-                return None
+                raise IntegrityError
 
             # decrypting c0a
             try:
                 fileList = self.crypto.symmetric_decrypt(c0a, fileListPw_key, cipher_name='AES', mode_name='CBC', IV=fileListPw_IV, iv=None, counter=None, ctr=None, segment_size=None)
             except Exception as e:
                 print(e.message)
-                return None
+                raise IntegrityError
 
             # converting string format fileList to actual dictionary
             fileList = json.loads(fileList)
@@ -178,6 +178,8 @@ class Client(BaseClient):
 
         self.storage_server.put(fileUid,"/".join([fileContent_enc, fileContent_enc_mac]))
 
+        self.sofar = fileUid
+
         return True
 
 
@@ -247,6 +249,11 @@ class Client(BaseClient):
         filePw_IV = self.crypto.get_random_bytes(16)
         filePw_mackey = self.crypto.get_random_bytes(32)
 
+        self.store_filePw(username, fileUid, filePw_key, filePw_IV, filePw_mackey)
+
+        return [filePw_key, filePw_IV, filePw_mackey]
+
+    def store_filePw(self, username, fileUid, filePw_key, filePw_IV, filePw_mackey):
         orig = "/".join([filePw_key, filePw_IV, filePw_mackey, fileUid])
 
         try:
@@ -256,8 +263,6 @@ class Client(BaseClient):
 
         # print("1:" + store_val_enc)
         self.storage_server.put("/".join([username, fileUid, "pw"]), store_val_enc)
-
-        return [filePw_key, filePw_IV, filePw_mackey]
 
 
     def get_passwords(self, fileUid):
@@ -312,4 +317,78 @@ class Client(BaseClient):
 
     def revoke(self, user, name):
         # Replace with your implementation (not needed for Part 1)
-        raise NotImplementedError
+        # raise NotImplementedError
+
+        fileList = self.fileListGrabber()
+        fileNameHash = self.crypto.cryptographic_hash(name, hash_name="SHA256")
+
+        if fileNameHash in fileList:
+            fileUid = fileList[fileNameHash]
+        else:
+            raise IntegrityError # TODO - review if this should be returned
+
+        #### get privateList
+
+        privateList = None # TODO - temporary
+
+        if user not in privateList:
+            return False # TODO - making it s.t. it returns True if successful, False if it doens't
+
+        privateList.remove(name)
+
+        # generate new passwords
+        filePw_key, filePw_IV, filePw_mackey = self.create_filePw(self, self.username, fileUid)
+
+        ### get publicList
+
+        publicList = None # TODO - temporary
+
+        newPublicList = dict()
+
+        for direct_name in privateList:
+            val = publicList[direct_name]
+
+            self.publicListUpdate(direct_name, publicList, newPublicList)
+
+
+        # update everyone who's made it here
+
+        updated_so_far = set()
+
+        for direct_name, indirect_list in newPublicList.values():
+            if direct_name not in updated_so_far:
+                self.store_filePw(direct_name, fileUid, filePw_key, filePw_IV, filePw_mackey)
+                updated_so_far.add(direct_name)
+            for indirect_name in indirect_list:
+                if indirect_name not in updated_so_far:
+                    self.store_filePw(indirect_name, fileUid, filePw_key, filePw_IV, filePw_mackey)
+                    updated_so_far.add(indirect_name)
+
+        # update values
+
+        for direct_name, indirect_list in newPublicList.values():
+            # indirect_list = encrypt indirect_list
+            newPublicList[direct_name] = indirect_list
+
+def publicListUpdate(self, username, oldDict, newDict):
+    entry = oldDict[username]
+
+    # verify and decrypt
+
+    # update
+
+    newDict[username] = name_list
+
+    for name in name_list:
+        if name not in newDict:
+            publicListUpdate(self, name, oldDict, newDict)
+
+
+
+
+
+
+
+
+
+
